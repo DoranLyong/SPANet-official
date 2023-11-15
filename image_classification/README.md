@@ -1,0 +1,58 @@
+# SPANet for Classification 
+
+<p align="left">
+<a href="https://arxiv.org/abs/2308.11568" alt="arXiv">
+    <img src="https://img.shields.io/badge/arXiv-2308.11568-b31b1b.svg?style=flat" /></a>
+<a href="https://openaccess.thecvf.com/content/ICCV2023/html/Yun_SPANet_Frequency-balancing_Token_Mixer_using_Spectral_Pooling_Aggregation_Modulation_ICCV_2023_paper.html" alt="Colab">
+    <img src="https://img.shields.io/badge/ICCV_2023-open_access-blue" /></a>
+</p>
+
+
+
+## Requirements
+
+torch>=1.7.0; torchvision>=0.8.0; pyyaml; [timm](https://github.com/rwightman/pytorch-image-models) (`pip install timm==0.6.11`)
+
+Data preparation: ImageNet with the following folder structure, you can extract ImageNet by this [script](https://gist.github.com/BIGBALLON/8a71d225eff18d88e469e6ea9b39cef4).
+
+```
+│imagenet/
+├──train/
+│  ├── n01440764
+│  │   ├── n01440764_10026.JPEG
+│  │   ├── n01440764_10027.JPEG
+│  │   ├── ......
+│  ├── ......
+├──val/
+│  ├── n01440764
+│  │   ├── ILSVRC2012_val_00000293.JPEG
+│  │   ├── ILSVRC2012_val_00002138.JPEG
+│  │   ├── ......
+│  ├── ......
+```
+
+
+## SPANet 
+### Models with the SPAM mixer trained on ImageNet-1K
+| Model | Resolution | Params | MACs | Top1 Acc | Download |
+| :---     |   :---:    |  :---: |  :---:  |  :---:  |  :---:  |
+| SPANet-S | 224 | 29M | 4.6G |  83.1 | |
+| SPANet-M | 224 | 42M | 6.8G |  83.5 | |
+| SPANet-MX | 224 | 55M | 9.0G |  83.8 | |
+| SPANet-B | 224 | 76M | 12.0G |  84.0 |  |
+| SPANet-BX | 224 | -- M | -- | --  |  |
+
+
+
+
+
+## Bibtex
+```latex
+@inproceedings{yun2023spanet,
+  title={SPANet: Frequency-balancing Token Mixer using Spectral Pooling Aggregation Modulation},
+  author={Yun, Guhnoo and Yoo, Juhan and Kim, Kijung and Lee, Jeongho and Kim, Dong Hwan},
+  booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
+  pages={6113--6124},
+  year={2023}
+}
+```
