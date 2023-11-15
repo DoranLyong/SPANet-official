@@ -40,7 +40,7 @@ Data preparation: ImageNet with the following folder structure, you can extract 
 | SPANet-M | 224 | 42M | 6.8G |  83.5 | |
 | SPANet-MX | 224 | 55M | 9.0G |  83.8 | |
 | SPANet-B | 224 | 76M | 12.0G |  84.0 |  |
-| SPANet-BX | 224 | -- M | -- | --  |  |
+| SPANet-BX | 224 | 100 M | 15.8G | --  |  |
 
 
 
