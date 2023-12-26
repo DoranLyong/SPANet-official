@@ -8,6 +8,12 @@
 </p>
 
 
+### To do:
+- [x] Training and validation code 
+- [] SPANet demo
+- [] Visualization of features out of SPAM
+
+
 
 ## Requirements
 
