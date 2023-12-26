@@ -43,7 +43,35 @@ Data preparation: ImageNet with the following folder structure, you can extract 
 | SPANet-BX | 224 | 100 M | 15.8G | --  |  |
 
 
+### Validation 
+To evaluate our SPANet models, run: 
+```bash 
+DataPATH=/path/to/imagenet 
+MODEL=spanet_medium
+ckpt=/path/to/checkpoint 
+batch_size=128
 
+python validate.py $DataPATH --model $MODEL -b $batch_size --checkpoint $ckpt
+```
+You check an example in [val.sh](./val.sh).
+
+### Train 
+We set batch size of 1024 by default and train models with 4 GPUs. For multi-node training, adjust `--grad-accum-steps` depending on your conditions. 
+
+To train (fine-tuning) the models, run:
+```bash 
+bash ./scripts/spanet/train_spanet_small.sh
+```
+You can check more details in [scripts](./scripts/spanet).
+
+
+
+
+
+
+
+## Acknowledgement 
+Our implementation is mainly based on [metaformer baseline](https://github.com/sail-sg/metaformer). We would like to thank for sharing your nice work!
 
 
 ## Bibtex
@@ -56,3 +84,5 @@ Data preparation: ImageNet with the following folder structure, you can extract 
   year={2023}
 }
 ```
+
+
