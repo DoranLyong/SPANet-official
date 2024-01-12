@@ -59,7 +59,7 @@ batch_size=128
 
 python validate.py $DataPATH --model $MODEL -b $batch_size --checkpoint $ckpt
 ```
-You check an example in [val.sh](./val.sh).
+You can check an example in [val.sh](./val.sh).
 
 ### Train 
 We set batch size of 1024 by default and train models with 4 GPUs. For multi-node training, adjust `--grad-accum-steps` depending on your conditions. 
