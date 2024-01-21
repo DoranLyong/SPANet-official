@@ -31,7 +31,7 @@ Please see [image_classification](image_classification) for more details.
 | SPANet-M   | ImageNet-1K | 224x224    | 83.5  | 41.8M   | 6.8G |
 | SPANet-MX   | ImageNet-1K | 224x224    | 83.8  | 54.9M   | 9.0G |
 | SPANet-B   | ImageNet-1K | 224x224    | 84.0  | 75.9M   | 12.0G |
-| SPANet-BX   | ImageNet-1K | 224x224    | --  | 99.8 M   | 15.8G |
+| SPANet-BX   | ImageNet-1K | 224x224    | 84.4  | 99.8 M   | 15.8G |
 
 ## Main results on COCO object detection and instance segmentation 
 Please see [object_detection](object_detection) for more details.
