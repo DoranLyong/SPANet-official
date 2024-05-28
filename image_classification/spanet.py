@@ -182,7 +182,7 @@ class SPAM(nn.Module):
         self.ctx = self.pws[0](feat_bank[0]) + self.pws[1](feat_bank[1]) + self.pws[2](feat_bank[2]) # context aggregation
         x = x * self.ctx # modulation
 
-        # == Aggregation == # 
+        # == Update == # 
         x = self.proj_out(x) 
         return x
 
