@@ -1,0 +1,463 @@
+# Copyright 2022 Garena Online Private Limited
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""
+MetaFormer baselines including IdentityFormer, RandFormer, PoolFormerV2,
+ConvFormer and CAFormer.
+Some implementations are modified from timm (https://github.com/rwightman/pytorch-image-models).
+"""
+import copy
+import os 
+
+from functools import partial
+import torch
+import torch.nn as nn
+from torch.nn import functional as F
+from torch.nn.modules.utils import _pair as to_2tuple
+
+
+from mmcv.cnn import build_norm_layer
+from mmcv.runner import BaseModule, _load_checkpoint
+from mmcv.cnn.bricks import DropPath
+from mmcv.cnn.utils.weight_init import (constant_init, normal_init,
+                                        trunc_normal_init)
+
+from mmdet.models.builder import BACKBONES
+from mmdet.utils import get_root_logger
+
+
+class PatchEmbed(BaseModule):
+    """
+    Patch Embedding that is implemented by a layer of conv. 
+    Input: tensor in shape [B, C, H, W]
+    Output: tensor in shape [B, C, H/stride, W/stride]
+    """
+    def __init__(self, patch_size=16, stride=16, padding=0, 
+                 in_chans=3, embed_dim=768, norm_layer=None):
+        super().__init__()
+        patch_size = to_2tuple(patch_size)
+        stride = to_2tuple(stride)
+        padding = to_2tuple(padding)
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, 
+                              stride=stride, padding=padding)
+        self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
+
+    def forward(self, x):
+        x = self.proj(x)
+        x = self.norm(x)
+        return x
+
+
+class GroupNorm(nn.Module):
+    """
+    Group Normalization with 1 group.
+    Input: tensor in shape [B, C, H, W]
+    """
+    def __init__(self, num_channels, **kwargs):
+        super().__init__(1, num_channels, **kwargs)
+
+
+class SpectralFilter(BaseModule):
+    """ Spectral pooling filter 
+    """
+    def __init__(self, H, W, r, lamb): 
+        super().__init__() 
+        #self.filter = nn.Parameter(self._CircleFilter(H, W, r, lamb).unsqueeze(0), requires_grad=False) # (1,H,W) with no_grad
+        self.filter = self._CircleFilter(H, W, r, lamb).unsqueeze(0) # (1,H,W) with no_grad
+
+    def _CircleFilter(self, H, W, r, lamb): 
+        """ 
+            --image size (H,W)
+            --r : radius 
+        """
+        x_center = int(W//2)
+        y_center = int(H//2)
+        X, Y = torch.meshgrid(torch.arange(0, H, 1), torch.arange(0,W,1)) 
+        circle = torch.sqrt((X-x_center)**2 + (Y-y_center)**2) 
+
+        lp_F = (circle < r).clone().to(torch.float32)
+        hp_F = (circle > r).clone().to(torch.float32)
+
+        combined_Filter = lp_F*lamb + hp_F*(1-lamb)  # (H, W)
+        combined_Filter[ ~(circle < r) & ~(circle > r)] = (lamb + (1-lamb))/3 # cutoff 
+
+        # apply Gaussian 
+
+        return combined_Filter 
+
+    def _shift(self, x): 
+        """ shift Fourier transformed feature map
+            then, low_frequency components are at the center
+            --x : (B,C,H,W)
+        """
+        return torch.fft.fftshift(x)
+
+    def _ishift(self, x): 
+        """ inverted shift Fourier transformed feature map
+            then, low_frequency components are at the corner 
+            --x : (B,C,H,W)
+        """
+        return torch.fft.ifftshift(x)
+
+    def forward(self, x):
+        _,_,in_H,in_W = x.shape
+        dtype = x.dtype 
+        self.filter = self.filter.to(dtype).to(x.device)
+
+        # -- FFT with shift -- 
+        x = self._shift(torch.fft.fft2(x, dim=(2, 3), norm='ortho')) # (B, C, in_H, in_W)
+
+        # -- filtering -- 
+        _, f_H, f_W = self.filter.shape
+        if (in_H, in_W) == (f_H, f_W):
+            # if the input size is the same as the size of the filter,
+            x = self.filter * x 
+        else:
+            pad_h = in_H - f_H
+            pad_w = in_W  - f_W
+            padding = (pad_w // 2 + pad_w%2, pad_w // 2, pad_h // 2 + pad_h%2, pad_h // 2)  # (pad_left, pad_right, pad_top, pad_bottom)
+            self.filter = F.pad(self.filter, padding, mode='constant', value=self.filter[0, 0 ,0])
+            x = self.filter * x 
+        
+        # --- iFFT with inverse shift --- 
+        x = torch.fft.ifft2(self._ishift(x), s=(in_H,in_W), dim=(2,3), norm='ortho').real.to(dtype)
+        return x
+
+
+class SPAttention(BaseModule):
+    """
+    Implementation of Spectral Pooling Attention for SPANet
+    --dim: embeding dim size 
+    --k_size: kernel size 
+    --r : radius 
+    """
+    def __init__(self, dim= 64, k_size=7, H=224, W=224, r=2**5):
+        super().__init__()
+        self.lambs = [lamb for lamb in torch.arange(0.7, 0.9, 0.1)] # (0.8, 0.95, 0.05)
+        print(self.lambs)
+
+        self.n_chunk = len(self.lambs)
+        dims = [size.shape[-1] for size in torch.chunk(torch.ones(dim), len(self.lambs), dim=-1)]
+        
+
+        self.proj_in = nn.Conv2d(dim, dim, 1) # pw-conv for channel expansion
+        self.conv =  nn.Sequential(            
+                nn.Conv2d(dim, dim, (1,k_size), padding=(0, k_size//2), groups=dim),
+                nn.Conv2d(dim, dim, (k_size,1), padding=(k_size//2, 0), groups=dim),
+            )
+        self.proj_out = nn.Conv2d(dim, dim, 1) 
+
+        self.sps = nn.ModuleList(
+            [SpectralFilter(H, W, r, lamb) for lamb in self.lambs]
+        )
+        self.pws = nn.ModuleList(
+            [nn.Conv2d(dims[i], dim, 1) # 1x1 pw-conv
+            for i in range(len(self.lambs))]
+        )
+    
+    def forward(self, x):
+        # == Token interaction == # 
+        x = self.proj_in(x) 
+        x = self.conv(x)
+
+        # -- spectral pooling 
+        chunks = [feat for feat in torch.chunk(x.clone(), self.n_chunk, dim=1)]
+        feat_bank = [self.sps[i](chunks[i]) for i in range(self.n_chunk)] 
+        self.ctx = self.pws[0](feat_bank[0]) + self.pws[1](feat_bank[1]) + self.pws[2](feat_bank[2]) # context aggregation
+        x = x * self.ctx # modulation
+
+        # == Aggregation == # 
+        x = self.proj_out(x) 
+        return x
+
+
+class Mlp(BaseModule):
+    """
+    Implementation of MLP with 1*1 convolutions.
+    Input: tensor with shape [B, C, H, W]
+    """
+    def __init__(self, in_features, hidden_features=None, 
+                 out_features=None, act_layer=nn.GELU, drop=0.):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        self.fc1 = nn.Conv2d(in_features, hidden_features, 1)
+        self.act = act_layer()
+        self.fc2 = nn.Conv2d(hidden_features, out_features, 1)
+        self.drop = nn.Dropout(drop)
+
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+
+class Scale(BaseModule):
+    """
+    Scale vector by element multiplications.
+    """
+    def __init__(self, dim, init_value=1.0, trainable=True):
+        super().__init__()
+        self.scale = nn.Parameter(init_value * torch.ones(dim), requires_grad=trainable)
+
+    def forward(self, x):
+        """ x : (B, C, H, W) 
+        """
+        return x * self.scale.unsqueeze(-1).unsqueeze(-1)
+
+
+
+class SPANetBlock(BaseModule):
+    """
+    Implementation of one SPANet block.
+    --dim: embedding dim
+    --k_size: kernel size 
+    --patch_dim: patch size 
+    --r: radius of filter 
+    --mlp_ratio: mlp expansion ratio
+    --act_layer: activation
+    --norm_layer: normalization
+    --drop: dropout rate
+    --drop path: Stochastic Depth, 
+        refer to https://arxiv.org/abs/1603.09382
+    --use_layer_scale, --layer_scale_init_value: LayerScale, 
+        refer to https://arxiv.org/abs/2103.17239
+    """
+    def __init__(self, dim, k_size=7, patch_dim=224//4, r=2**1, mlp_ratio=4., 
+                 act_layer=nn.GELU, norm_layer=nn.GroupNorm, 
+                 drop=0., drop_path=0., res_scale_init_value=None):
+
+        super().__init__()
+        self.norm1 = norm_layer(1, dim)
+        self.token_mixer = SPAttention(dim=dim, k_size=k_size, H=patch_dim,W=patch_dim, r=r)
+        self.norm2 = norm_layer(1, dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, 
+                       act_layer=act_layer, drop=drop)
+
+        # The following two techniques are useful to train deep SPANets.
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+        self.res_scale1 = Scale(dim=dim, init_value=res_scale_init_value) if res_scale_init_value else nn.Identity()
+        self.res_scale2 = Scale(dim=dim, init_value=res_scale_init_value) if res_scale_init_value else nn.Identity()
+
+
+    def forward(self, x):
+        x = self.res_scale1(x) + self.drop_path(self.token_mixer(self.norm1(x)))
+        x = self.res_scale2(x) + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+def basic_blocks(dim, index, layers, 
+                 k_size=7, patch_dim=224//4, r=2**1, mlp_ratio=4., 
+                 act_layer=nn.GELU, norm_layer=GroupNorm, 
+                 drop_rate=.0, drop_path_rate=0., 
+                 res_scale_init_value=None):
+    """
+    generate SPANet blocks for a stage
+    return: SPANet blocks 
+    """
+    blocks = []
+    for block_idx in range(layers[index]):
+        block_dpr = drop_path_rate * (
+            block_idx + sum(layers[:index])) / (sum(layers) - 1)
+        blocks.append(SPANetBlock(
+            dim, k_size=k_size, patch_dim=patch_dim, r=r, mlp_ratio=mlp_ratio, 
+            act_layer=act_layer, norm_layer=norm_layer, 
+            drop=drop_rate, drop_path=block_dpr, 
+            res_scale_init_value=res_scale_init_value, 
+            ))
+    blocks = nn.Sequential(*blocks)
+
+    return blocks
+
+
+
+@ BACKBONES.register_module()
+class SPANet(BaseModule):
+    """
+    SPANet, the main class of our model
+    --layers: [x,x,x,x], number of blocks for the 4 stages
+    --embed_dims, --mlp_ratios, --k_size: the embedding dims, mlp ratios and 
+        pooling size for the 4 stages
+    --patch_dims: the patch size for the 4 stages
+    --radius(list): radius of filter; [2**4, 2**3, 2**2, 2**1]
+    --downsamples: flags to apply downsampling or not
+    --norm_layer, --act_layer: define the types of normalization and activation
+    --num_classes: number of classes for the image classification
+    --in_patch_size, --in_stride, --in_pad: specify the patch embedding
+        for the input image
+    --down_patch_size --down_stride --down_pad: 
+        specify the downsample (patch embed.)
+    --fork_feat: whether output features of the 4 stages, for dense prediction
+    --init_cfg, --pretrained: 
+        for mmdetection and mmsegmentation to load pretrained weights
+    """
+    def __init__(self, layers, embed_dims=None, patch_dims=None,
+                 mlp_ratios=None, downsamples=None, 
+                 k_size=7, 
+                 radius=[2**1, 2**1, 2**0, 2**0],
+                 norm_layer=nn.GroupNorm, act_layer=nn.GELU, 
+                 in_patch_size=7, in_stride=4, in_pad=2, 
+                 down_patch_size=3, down_stride=2, down_pad=1, 
+                 drop_rate=0., drop_path_rate=0.,
+                 res_scale_init_values=[None, None, 1.0, 1.0],
+                 init_cfg=None, 
+                 pretrained=None, 
+                 **kwargs):
+
+        super().__init__()
+
+        self.patch_embed = PatchEmbed(
+            patch_size=in_patch_size, stride=in_stride, padding=in_pad, 
+            in_chans=3, embed_dim=embed_dims[0])
+
+        # set the main block in network
+        network = []
+        for i in range(len(layers)):
+            stage = basic_blocks(embed_dims[i], i, layers, 
+                                 k_size=k_size, patch_dim= patch_dims[i], r=radius[i], mlp_ratio=mlp_ratios[i],
+                                 act_layer=act_layer, norm_layer=norm_layer, 
+                                 drop_rate=drop_rate, 
+                                 drop_path_rate=drop_path_rate,
+                                 res_scale_init_value=res_scale_init_values[i])
+            network.append(stage)
+            if i >= len(layers) - 1:
+                break
+            if downsamples[i] or embed_dims[i] != embed_dims[i+1]:
+                # downsampling between two stages
+                network.append(
+                    PatchEmbed(
+                        patch_size=down_patch_size, stride=down_stride, 
+                        padding=down_pad, 
+                        in_chans=embed_dims[i], embed_dim=embed_dims[i+1]
+                        )
+                    )
+
+        self.network = nn.ModuleList(network)
+
+        # -- for dense prediction
+        # add a norm layer for each output
+        self.out_indices = [0, 2, 4, 6]
+        for i_emb, i_layer in enumerate(self.out_indices):
+            if i_emb == 0 and os.environ.get('FORK_LAST3', None):
+                    # TODO: more elegant way
+                    """For RetinaNet, `start_level=1`. The first norm layer will not used.
+                    cmd: `FORK_LAST3=1 python -m torch.distributed.launch ...`
+                    """
+                    layer = nn.Identity()
+            else:
+                layer = norm_layer(1, embed_dims[i_emb])  # group norm
+            layer_name = f'norm{i_layer}'
+            self.add_module(layer_name, layer)
+
+
+    
+        self.init_cfg = copy.deepcopy(init_cfg)
+    
+        # --load pre-trained model 
+        if (self.init_cfg is not None or pretrained is not None):
+            self.init_weights()
+
+
+    # init for mmdetection or mmsegmentation by loading 
+    # imagenet pre-trained weights
+    def init_weights(self, pretrained=None):
+        logger = get_root_logger()
+        if self.init_cfg is None and pretrained is None:
+            logger.warn(f'No pre-trained weights for '
+                        f'{self.__class__.__name__}, '
+                        f'training start from scratch')
+            pass
+        else:
+            assert 'checkpoint' in self.init_cfg, f'Only support ' \
+                                                  f'specify `Pretrained` in ' \
+                                                  f'`init_cfg` in ' \
+                                                  f'{self.__class__.__name__} '
+            if self.init_cfg is not None:
+                ckpt_path = self.init_cfg['checkpoint']
+            elif pretrained is not None:
+                ckpt_path = pretrained
+
+            ckpt = _load_checkpoint(
+                ckpt_path, logger=logger, map_location='cpu')
+            if 'state_dict' in ckpt:
+                _state_dict = ckpt['state_dict']
+            elif 'model' in ckpt:
+                _state_dict = ckpt['model']
+            else:
+                _state_dict = ckpt
+
+            state_dict = _state_dict
+            missing_keys, unexpected_keys = \
+                self.load_state_dict(state_dict, False)
+            
+            # -- show for debug
+            #print('missing_keys: ', missing_keys)
+            #print('unexpected_keys: ', unexpected_keys)
+
+
+    def forward_embeddings(self, x):
+        x = self.patch_embed(x)
+        return x
+
+    def forward_tokens(self, x):
+        outs = []
+        for idx, block in enumerate(self.network):
+            x = block(x)
+            if idx in self.out_indices:
+                norm_layer = getattr(self, f'norm{idx}')
+                x_out = norm_layer(x)
+                outs.append(x_out)
+        
+        # output the features of four stages for dense prediction
+        return outs
+
+
+    def forward(self, x):
+        # input embedding
+        x = self.forward_embeddings(x)
+        # through backbone
+        x = self.forward_tokens(x)
+        return x
+
+
+
+
+if __name__ == "__main__": 
+    import torch 
+
+    layers = [4, 4, 12, 4]
+    embed_dims = [64, 128, 320, 512]
+    img_size = 512
+    patch_dims = [img_size//2**2, img_size//2**3, img_size//2**4, img_size//2**5]    
+    radius=[2**1, 2**1, 2**0, 2**0]
+    mlp_ratios = [4, 4, 4, 4]
+    downsamples = [True, True, True, True]
+
+    model = SPANet(layers, embed_dims=embed_dims, patch_dims = patch_dims, radius=radius, 
+                    mlp_ratios=mlp_ratios, downsamples=downsamples).to('cuda')
+    model.eval()
+
+    image_size = [512, 512]
+    input = torch.rand(1, 3, *image_size).to('cuda')
+
+    out = model(input)
+    
+    for i in range(len(out)):
+        print(out[i].shape)
