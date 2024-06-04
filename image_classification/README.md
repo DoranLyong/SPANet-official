@@ -10,7 +10,7 @@
 
 ### To do:
 - [x] Training and validation code 
-- [] SPANet checkpoints with demo
+- [x] SPANet checkpoints with demo
 - [] Visualization of features out of SPAM
 
 
