@@ -42,11 +42,11 @@ Data preparation: ImageNet with the following folder structure, you can extract 
 ### Models with the SPAM mixer trained on ImageNet-1K
 | Model | Resolution | Params | MACs | Top1 Acc | Download |
 | :---     |   :---:    |  :---: |  :---:  |  :---:  |  :---:  |
-| SPANet-S | 224 | 29M | 4.6G |  83.1 | |
-| SPANet-M | 224 | 42M | 6.8G |  83.5 | |
-| SPANet-MX | 224 | 55M | 9.0G |  83.8 | |
-| SPANet-B | 224 | 76M | 12.0G |  84.0 |  |
-| SPANet-BX | 224 | 100 M | 15.8G | 84.4  |  |
+| SPANet-S | 224 | 29M | 4.6G |  83.1 | [link](https://github.com/DoranLyong/SPANet-official/releases/download/ImageNet-pretrained/spanet-small.pth) |
+| SPANet-M | 224 | 42M | 6.8G |  83.5 | [link](https://github.com/DoranLyong/SPANet-official/releases/download/ImageNet-pretrained/spanet-medium.pth)  |
+| SPANet-MX | 224 | 55M | 9.0G |  83.8 | [link](https://github.com/DoranLyong/SPANet-official/releases/download/ImageNet-pretrained/spanet-mediumX.pth) |
+| SPANet-B | 224 | 76M | 12.0G |  84.0 | [link](https://github.com/DoranLyong/SPANet-official/releases/download/ImageNet-pretrained/spanet-base.pth)  |
+| SPANet-BX | 224 | 100 M | 15.8G | 84.4  | [link](https://github.com/DoranLyong/SPANet-official/releases/download/ImageNet-pretrained/spanet-baseX.pth)  |
 
 
 ### Validation 
