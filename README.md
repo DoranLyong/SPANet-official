@@ -14,7 +14,7 @@
 
 ### 🤖 It currently includes code and models for the following tasks:
 - [x] [Image Classification](./image_classification)
-- [] [Object Detection](object_detection)
+- [x] [Object Detection](object_detection)
 - [] [Semantic Segmentation](semantic_segmentation)
 
 
