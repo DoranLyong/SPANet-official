@@ -1,4 +1,4 @@
-# SPANet Official (ongoing)
+# SPANet Official
 <p align="left">
 <a href="https://arxiv.org/abs/2308.11568" alt="arXiv">
     <img src="https://img.shields.io/badge/arXiv-2308.11568-b31b1b.svg?style=flat" /></a>
