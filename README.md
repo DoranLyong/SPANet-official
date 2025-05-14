@@ -11,6 +11,9 @@
 ### 💬 This repo is the official implementation of:
 - ***ICCV2023***: SPANet: Frequency-balancing Token Mixer using Spectral Pooling Aggregation Modulation
 
+### 🗞️ News:
+- ***arXiv2025***: [Spectral-Adaptive Modulation Networks for Visual Perception](https://arxiv.org/abs/2503.23947)
+
 
 ### 🤖 It currently includes code and models for the following tasks:
 - [x] [Image Classification](./image_classification)
