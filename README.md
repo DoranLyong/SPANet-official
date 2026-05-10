@@ -2,8 +2,8 @@
 <p align="left">
 <a href="https://arxiv.org/abs/2308.11568" alt="arXiv">
     <img src="https://img.shields.io/badge/arXiv-2308.11568-b31b1b.svg?style=flat" /></a>
-<a href="https://www.computer.org/csdl/journal/tp/5555/01/11506226/2ggMsOn0gU0" alt="Colab">
-    <img src="https://img.shields.io/badge/TPAMI_2026-blue" /></a>
+<a href="https://openaccess.thecvf.com/content/ICCV2023/html/Yun_SPANet_Frequency-balancing_Token_Mixer_using_Spectral_Pooling_Aggregation_Modulation_ICCV_2023_paper.html" alt="Colab">
+    <img src="https://img.shields.io/badge/ICCV_2023-Open_Access-blue" /></a>
 <a href="https://doranlyong.github.io/projects/spanet/"> 
    <img src="https://img.shields.io/badge/project-page-blue"></a>
 </p>
