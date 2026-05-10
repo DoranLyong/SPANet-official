@@ -6,6 +6,8 @@
     <img src="https://img.shields.io/badge/ICCV_2023-Open_Access-blue" /></a>
 <a href="https://doranlyong.github.io/projects/spanet/"> 
    <img src="https://img.shields.io/badge/project-page-blue"></a>
+<a href="https://ieeexplore.ieee.org/document/11506226/">
+   <img src="https://img.shields.io/badge/IEEE_TPAMI-2026-00629B.svg?style=flat" /></a>    
 </p>
 
 ### 💬 This repo is the official implementation of:
